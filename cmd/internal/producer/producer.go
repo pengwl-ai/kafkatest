@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
+	
 	"kafkatest/cmd/internal/config"
 	"kafkatest/cmd/internal/logger"
 	"kafkatest/cmd/internal/metrics"
@@ -16,38 +17,48 @@ import (
 
 // Producer Kafka 生产者
 type Producer struct {
-	config  *config.Config
-	logger  *logger.Logger
-	metrics *metrics.Metrics
-	writer  *kafka.Writer
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	config   *config.Config
+	logger   *logger.Logger
+	metrics  *metrics.Metrics
+	producer sarama.SyncProducer
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 // NewProducer 创建一个新的 Kafka 生产者
 func NewProducer(cfg *config.Config, log *logger.Logger) *Producer {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 创建 Kafka Writer
+	// 创建 Sarama 配置
+	config := sarama.NewConfig()
+	config.Producer.Return.Successes = true
+	config.Producer.RequiredAcks = sarama.WaitForAll
+	config.Producer.Retry.Max = 5
+	config.Producer.Retry.Backoff = 100 * time.Millisecond
+	config.Producer.Partitioner = sarama.NewRandomPartitioner
+
+	config.Net.SASL.Enable = true
+	config.Net.SASL.Handshake = true
+	config.Net.SASL.User = "kafka-admin"
+	config.Net.SASL.Password = "Aa71-Sa8+cM2w09Y"
+	config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+	config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &utils.XDGSCRAMClient{HashGeneratorFcn: utils.SHA512} }
+
 	Brokers := strings.Split(cfg.Kafka.Brokers, ",")
-	writer := &kafka.Writer{
-		Addr:                   kafka.TCP(Brokers...),
-		Topic:                  cfg.Producer.Topic,
-		Balancer:               &kafka.LeastBytes{},
-		RequiredAcks:           kafka.RequireOne,
-		AllowAutoTopicCreation: true,
-		BatchSize:              cfg.Producer.BatchSize,
-		BatchTimeout:           cfg.Producer.BatchTimeout,
+	// 创建同步生产者
+	producer, err := sarama.NewSyncProducer(Brokers, config)
+	if err != nil {
+		log.Fatalf("创建 Kafka 生产者失败: %v", err)
 	}
 
 	return &Producer{
-		config:  cfg,
-		logger:  log,
-		metrics: metrics.NewMetrics(),
-		writer:  writer,
-		ctx:     ctx,
-		cancel:  cancel,
+		config:   cfg,
+		logger:   log,
+		metrics:  metrics.NewMetrics(),
+		producer: producer,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
@@ -95,7 +106,7 @@ func (p *Producer) Stop() {
 	p.cancel()
 	p.wg.Wait()
 	p.metrics.Finish()
-	p.writer.Close()
+	p.producer.Close()
 }
 
 // worker 工作协程
@@ -123,22 +134,24 @@ func (p *Producer) worker(id int, messageCount int, interval time.Duration) {
 			startTime := time.Now()
 
 			// 创建消息
-			message := kafka.Message{
-				Key:   []byte(fmt.Sprintf("key-%d-%d", id, i)),
-				Value: messageData,
-				Time:  startTime,
+			message := &sarama.ProducerMessage{
+				Topic: p.config.Producer.Topic,
+				Key:   sarama.StringEncoder(fmt.Sprintf("key-%d-%d", id, i)),
+				Value: sarama.ByteEncoder(messageData),
 			}
 
 			// 发送消息
-			err := p.writer.WriteMessages(p.ctx, message)
+			partition, offset, err := p.producer.SendMessage(message)
 			latency := time.Since(startTime)
 
 			// 记录指标
-			size := int64(len(message.Value))
+			size := int64(len(messageData))
 			p.metrics.Record(size, latency, err)
 
 			if err != nil {
 				p.logger.Errorf("发送消息失败: %v", err)
+			} else {
+				p.logger.Debugf("消息发送成功: partition=%d, offset=%d", partition, offset)
 			}
 		}
 	}

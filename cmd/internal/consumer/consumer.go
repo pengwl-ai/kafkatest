@@ -7,52 +7,63 @@ import (
 	"sync"
 	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/IBM/sarama"
+
 	"kafkatest/cmd/internal/config"
 	"kafkatest/cmd/internal/logger"
 	"kafkatest/cmd/internal/metrics"
+	"kafkatest/pkg/utils"
 )
 
 // Consumer Kafka 消费者
 type Consumer struct {
-	config  *config.Config
-	logger  *logger.Logger
-	metrics *metrics.Metrics
-	reader  *kafka.Reader
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	config   *config.Config
+	logger   *logger.Logger
+	metrics  *metrics.Metrics
+	consumer sarama.ConsumerGroup
+	ctx      context.Context
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 // NewConsumer 创建一个新的 Kafka 消费者
 func NewConsumer(cfg *config.Config, log *logger.Logger) *Consumer {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 创建 Kafka Reader
-	Brokers := strings.Split(cfg.Kafka.Brokers, ",")
-	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:  Brokers,
-		Topic:    cfg.Consumer.Topic,
-		GroupID:  cfg.Consumer.Group,
-		MinBytes: 10e3, // 10KB
-		MaxBytes: 10e6, // 10MB
-	})
+	// 创建 Sarama 配置
+	config := sarama.NewConfig()
+	config.Consumer.Return.Errors = true
+	config.Version = sarama.V2_5_0_0 // 使用 Kafka 2.5.0 版本
 
 	// 设置初始偏移量
 	switch cfg.Consumer.Offset {
 	case "earliest":
-		reader.SetOffset(kafka.FirstOffset)
+		config.Consumer.Offsets.Initial = sarama.OffsetOldest
 	case "latest":
-		reader.SetOffset(kafka.LastOffset)
+		config.Consumer.Offsets.Initial = sarama.OffsetNewest
+	}
+
+	Brokers := strings.Split(cfg.Kafka.Brokers, ",")
+	config.Net.SASL.Enable = true
+	config.Net.SASL.Handshake = true
+	config.Net.SASL.User = "kafka-admin"
+	config.Net.SASL.Password = "Aa71-Sa8+cM2w09Y"
+	config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
+	config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &utils.XDGSCRAMClient{HashGeneratorFcn: utils.SHA512} }
+
+	// 创建消费者组
+	consumer, err := sarama.NewConsumerGroup(Brokers, cfg.Consumer.Group, config)
+	if err != nil {
+		log.Fatalf("创建 Kafka 消费者失败: %v", err)
 	}
 
 	return &Consumer{
-		config:  cfg,
-		logger:  log,
-		metrics: metrics.NewMetrics(),
-		reader:  reader,
-		ctx:     ctx,
-		cancel:  cancel,
+		config:   cfg,
+		logger:   log,
+		metrics:  metrics.NewMetrics(),
+		consumer: consumer,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 }
 
@@ -64,11 +75,32 @@ func (c *Consumer) Start() error {
 	c.logger.Infof("并发数: %d", c.config.Consumer.Concurrency)
 	c.logger.Infof("测试时长: %v", c.config.Consumer.Duration)
 
-	// 启动工作协程
-	for i := 0; i < c.config.Consumer.Concurrency; i++ {
-		c.wg.Add(1)
-		go c.worker(i)
+	// 创建消费者组处理器
+	handler := &consumerGroupHandler{
+		consumer: c,
 	}
+
+	// 启动消费者组
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for {
+			select {
+			case <-c.ctx.Done():
+				c.logger.Info("消费者组收到停止信号")
+				return
+			default:
+				// 消费消息
+				if err := c.consumer.Consume(c.ctx, []string{c.config.Consumer.Topic}, handler); err != nil {
+					if err == sarama.ErrClosedConsumerGroup {
+						c.logger.Info("消费者组已关闭")
+						return
+					}
+					c.logger.Errorf("消费消息错误: %v", err)
+				}
+			}
+		}
+	}()
 
 	// 如果设置了测试时长，启动定时器
 	if c.config.Consumer.Duration > 0 {
@@ -87,53 +119,50 @@ func (c *Consumer) Stop() {
 	c.cancel()
 	c.wg.Wait()
 	c.metrics.Finish()
-	c.reader.Close()
+	c.consumer.Close()
 }
 
-// worker 工作协程
-func (c *Consumer) worker(id int) {
-	defer c.wg.Done()
+// consumerGroupHandler 实现 sarama.ConsumerGroupHandler 接口
+type consumerGroupHandler struct {
+	consumer *Consumer
+}
 
-	c.logger.Infof("启动工作协程 %d", id)
+// Setup 在消费者组会话开始时调用
+func (h *consumerGroupHandler) Setup(sarama.ConsumerGroupSession) error {
+	return nil
+}
 
-	for {
+// Cleanup 在消费者组会话结束时调用
+func (h *consumerGroupHandler) Cleanup(sarama.ConsumerGroupSession) error {
+	return nil
+}
+
+// ConsumeClaim 处理消息消费
+func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+	h.consumer.logger.Infof("开始消费分区: %d", claim.Partition())
+
+	for message := range claim.Messages() {
 		select {
-		case <-c.ctx.Done():
-			c.logger.Infof("工作协程 %d 收到停止信号", id)
-			return
+		case <-h.consumer.ctx.Done():
+			h.consumer.logger.Info("消费者收到停止信号")
+			return nil
 		default:
-			startTime := time.Now()
-
-			// 读取消息
-			message, err := c.reader.ReadMessage(c.ctx)
-			latency := time.Since(startTime)
-
-			if err != nil {
-				// 检查是否是上下文取消错误
-				if err == context.Canceled {
-					c.logger.Infof("工作协程 %d 收到停止信号", id)
-					return
-				}
-
-				// 记录错误
-				c.metrics.Record(0, latency, err)
-				c.logger.Errorf("读取消息失败: %v", err)
-				continue
-			}
-
 			// 计算消息延迟
-			messageLatency := time.Since(message.Time)
+			messageLatency := time.Since(message.Timestamp)
 
 			// 记录指标
 			size := int64(len(message.Value))
-			c.metrics.Record(size, messageLatency, nil)
+			h.consumer.metrics.Record(size, messageLatency, nil)
 
-			// 手动提交偏移量
-			if err := c.reader.CommitMessages(c.ctx, message); err != nil {
-				c.logger.Errorf("提交偏移量失败: %v", err)
-			}
+			// 标记消息为已处理
+			session.MarkMessage(message, "")
+
+			h.consumer.logger.Debugf("处理消息: topic=%s, partition=%d, offset=%d",
+				message.Topic, message.Partition, message.Offset)
 		}
 	}
+
+	return nil
 }
 
 // Wait 等待消费者测试完成
