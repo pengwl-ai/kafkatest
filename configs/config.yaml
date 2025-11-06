@@ -1,0 +1,40 @@
+# Kafka 性能测试工具配置文件
+
+# Kafka 服务器配置
+kafka:
+  brokers: "10.22.132.21:9093,10.22.132.22:9093,10.22.132.23:9093"  # Kafka 服务器地址，多个地址用逗号分隔
+  dial_timeout: 10s          # 连接超时时间
+  write_timeout: 10s         # 写入超时时间
+  read_timeout: 10s          # 读取超时时间
+
+# 生产者测试配置
+producer:
+  topic: "test"        # 默认主题
+  message_size: 1024         # 默认消息大小（字节）
+  message_count: 1000        # 默认消息数量
+  rate: 100                  # 默认发送速率（消息/秒）
+  concurrency: 1             # 默认并发数
+  duration: 0                # 默认测试时长（0 表示不限制）
+  batch_size: 100            # 批量发送大小
+  batch_timeout: 1s          # 批量发送超时时间
+
+# 消费者测试配置
+consumer:
+  topic: "test"        # 默认主题
+  group: "test"        # 默认消费者组
+  concurrency: 1             # 默认并发数
+  duration: 30s              # 默认测试时长
+  batch_size: 100            # 批量消费大小
+  offset: "latest"           # 初始偏移量 (latest, earliest)
+
+# 输出配置
+output:
+  format: "console"          # 输出格式 (console, json, csv)
+  file: ""                   # 输出文件路径（空表示输出到控制台）
+  verbose: false             # 是否显示详细信息
+
+# 日志配置
+logging:
+  level: "info"              # 日志级别 (debug, info, warn, error)
+  format: "text"             # 日志格式 (text, json)
+  output: "stdout"           # 日志输出位置
