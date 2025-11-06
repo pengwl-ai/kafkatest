@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -50,6 +51,12 @@ func NewConsumer(cfg *config.Config, log *logger.Logger) *Consumer {
 	config.Net.SASL.Password = "Aa71-Sa8+cM2w09Y"
 	config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
 	config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &utils.XDGSCRAMClient{HashGeneratorFcn: utils.SHA512} }
+
+	// 开启了 dialer proxy
+	if cfg.Kafka.Proxy {
+		config.Net.Proxy.Enable = true
+		config.Net.Proxy.Dialer = utils.GetDialerProxy(config, cfg.Kafka.AddrMap)
+	}
 
 	// 创建消费者组
 	consumer, err := sarama.NewConsumerGroup(Brokers, cfg.Consumer.Group, config)
@@ -149,6 +156,8 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 		default:
 			// 计算消息延迟
 			messageLatency := time.Since(message.Timestamp)
+			data, _ := json.Marshal(message)
+			h.consumer.logger.Infof("messageLatency: %v, consumeClaim data: %s", messageLatency, data)
 
 			// 记录指标
 			size := int64(len(message.Value))

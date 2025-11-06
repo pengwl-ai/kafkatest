@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	
+
 	"kafkatest/cmd/internal/config"
 	"kafkatest/cmd/internal/logger"
 	"kafkatest/cmd/internal/metrics"
@@ -44,6 +44,12 @@ func NewProducer(cfg *config.Config, log *logger.Logger) *Producer {
 	config.Net.SASL.Password = "Aa71-Sa8+cM2w09Y"
 	config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
 	config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &utils.XDGSCRAMClient{HashGeneratorFcn: utils.SHA512} }
+
+	// 开启了 dialer proxy
+	if cfg.Kafka.Proxy {
+		config.Net.Proxy.Enable = true
+		config.Net.Proxy.Dialer = utils.GetDialerProxy(config, cfg.Kafka.AddrMap)
+	}
 
 	Brokers := strings.Split(cfg.Kafka.Brokers, ",")
 	// 创建同步生产者

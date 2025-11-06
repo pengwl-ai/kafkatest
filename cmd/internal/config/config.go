@@ -19,10 +19,12 @@ type Config struct {
 
 // KafkaConfig 表示 Kafka 相关配置
 type KafkaConfig struct {
-	Brokers      string        `mapstructure:"brokers"`
-	DialTimeout  time.Duration `mapstructure:"dial_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	Brokers      string                 `mapstructure:"brokers"`
+	DialTimeout  time.Duration          `mapstructure:"dial_timeout"`
+	WriteTimeout time.Duration          `mapstructure:"write_timeout"`
+	ReadTimeout  time.Duration          `mapstructure:"read_timeout"`
+	Proxy        bool                   `mapstructure:"proxy"`
+	AddrMap      map[string]interface{} `mapstructure:"addr_map"`
 }
 
 // ProducerConfig 表示生产者测试配置
