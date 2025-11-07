@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-debug
+  namespace: default
+  labels:
+    app: busybox1
+    purpose: network-debug1
+spec:
+  nodeName: master-0de3a-0
+  containers:
+    - name: busybox1
+      image: busybox:latest  # 推荐使用较新版本
+      imagePullPolicy: IfNotPresent
+      command: [ "/bin/sh" ]
+      args: [ "-c", "sleep 3600" ]
+      resources:
+        requests:
+          memory: "32Mi"
+          cpu: "250m"
+        limits:
+          memory: "64Mi"
+          cpu: "500m"
+      securityContext:
+        privileged: true
+        readOnlyRootFilesystem: false  # 增强安全性
+      volumeMounts:
+        - name: pwl
+          mountPath: /root/pwl
+  volumes:
+    - name: pwl
+      hostPath:
+        path: /root/pwl
+        type: DirectoryOrCreate
+  restartPolicy: Never  # 仅运行一次

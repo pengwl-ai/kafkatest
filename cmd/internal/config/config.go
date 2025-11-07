@@ -25,6 +25,8 @@ type KafkaConfig struct {
 	ReadTimeout  time.Duration          `mapstructure:"read_timeout"`
 	Proxy        bool                   `mapstructure:"proxy"`
 	AddrMap      map[string]interface{} `mapstructure:"addr_map"`
+	User         string                 `mapstructure:"user"`
+	Password     string                 `mapstructure:"password"`
 }
 
 // ProducerConfig 表示生产者测试配置
@@ -94,6 +96,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("解析配置失败: %w", err)
 	}
+
+	fmt.Printf("kafka proxy: %v\n", config.Kafka.Proxy)
+	fmt.Printf("kafka AddrMap: %v\n", config.Kafka.AddrMap)
 
 	return &config, nil
 }

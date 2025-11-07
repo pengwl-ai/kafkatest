@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: busybox-debug-daemonset
+  namespace: default
+  labels:
+    app: busybox
+    purpose: network-debug
+spec:
+  selector:
+    matchLabels:
+      app: busybox  # 必须与 Pod 模板标签匹配
+  template:
+    metadata:
+      labels:
+        app: busybox
+    spec:
+      containers:
+        - name: busybox
+          image: busybox:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh"]
+          args: ["-c", "sleep 3600"]
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "250m"
+            limits:
+              memory: "64Mi"
+              cpu: "500m"
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: pwl
+              mountPath: /root/pwl
+      volumes:
+        - name: pwl
+          hostPath:
+            path: /root/pwl
+            type: DirectoryOrCreate
+

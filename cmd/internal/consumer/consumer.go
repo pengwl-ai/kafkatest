@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -47,8 +46,8 @@ func NewConsumer(cfg *config.Config, log *logger.Logger) *Consumer {
 	Brokers := strings.Split(cfg.Kafka.Brokers, ",")
 	config.Net.SASL.Enable = true
 	config.Net.SASL.Handshake = true
-	config.Net.SASL.User = "kafka-admin"
-	config.Net.SASL.Password = "Aa71-Sa8+cM2w09Y"
+	config.Net.SASL.User = cfg.Kafka.User
+	config.Net.SASL.Password = cfg.Kafka.Password
 	config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
 	config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &utils.XDGSCRAMClient{HashGeneratorFcn: utils.SHA512} }
 
@@ -156,8 +155,6 @@ func (h *consumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 		default:
 			// 计算消息延迟
 			messageLatency := time.Since(message.Timestamp)
-			data, _ := json.Marshal(message)
-			h.consumer.logger.Infof("messageLatency: %v, consumeClaim data: %s", messageLatency, data)
 
 			// 记录指标
 			size := int64(len(message.Value))

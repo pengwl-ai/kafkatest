@@ -40,8 +40,8 @@ func NewProducer(cfg *config.Config, log *logger.Logger) *Producer {
 
 	config.Net.SASL.Enable = true
 	config.Net.SASL.Handshake = true
-	config.Net.SASL.User = "kafka-admin"
-	config.Net.SASL.Password = "Aa71-Sa8+cM2w09Y"
+	config.Net.SASL.User = cfg.Kafka.User
+	config.Net.SASL.Password = cfg.Kafka.Password
 	config.Net.SASL.Mechanism = sarama.SASLTypeSCRAMSHA512
 	config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient { return &utils.XDGSCRAMClient{HashGeneratorFcn: utils.SHA512} }
 
